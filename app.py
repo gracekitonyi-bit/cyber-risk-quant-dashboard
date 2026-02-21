@@ -1,5 +1,4 @@
 import os
-import io
 import tempfile
 from datetime import datetime
 
@@ -19,21 +18,16 @@ st.set_page_config(page_title="Cyber Risk Quant Dashboard", layout="wide")
 
 
 # =============================
-# Small helpers
+# Helpers
 # =============================
-def safe_show_logo(logo_path: str, width: int = 240):
+def safe_show_logo(logo_path: str, width: int = 220):
     """Show logo in Streamlit without crashing if image/path has issues."""
-    if not logo_path:
+    if not logo_path or not os.path.exists(logo_path):
         return
-    if not os.path.exists(logo_path):
-        return
-
     try:
-        # Use bytes so Streamlit doesn't get confused by path edge-cases
         with open(logo_path, "rb") as f:
             st.image(f.read(), width=width)
     except Exception:
-        # If anything goes wrong, fail silently (app keeps running)
         pass
 
 
@@ -55,39 +49,64 @@ def compute_eal(trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_,
     return float(metrics_["Expected Annual Loss"])
 
 
+def _apply_exec_style():
+    """Make matplotlib charts look more executive-friendly."""
+    try:
+        plt.style.use("seaborn-v0_8-whitegrid")
+    except Exception:
+        # If style not available, fallback silently
+        pass
+
+
+def add_pdf_footer(fig, text):
+    """Add a professional footer to a matplotlib figure."""
+    fig.text(0.08, 0.02, text, fontsize=8, color="gray", ha="left", va="bottom")
+
+
 def make_distribution_figure(baseline_losses, baseline_metrics, controlled_losses=None, controlled_metrics=None):
-    fig, ax = plt.subplots()
-    ax.hist(baseline_losses, bins=50, alpha=0.6, label="Baseline")
-    ax.axvline(baseline_metrics["VaR 95%"], linestyle="dashed", label="Baseline VaR 95%")
+    _apply_exec_style()
+
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    fig.patch.set_facecolor("white")
+
+    ax.hist(baseline_losses, bins=50, alpha=0.65, label="Baseline")
+    ax.axvline(baseline_metrics["VaR 95%"], linestyle="dashed", linewidth=2, label="Baseline VaR 95%")
 
     if controlled_losses is not None and controlled_metrics is not None:
-        ax.hist(controlled_losses, bins=50, alpha=0.6, label="Controlled")
-        ax.axvline(controlled_metrics["VaR 95%"], linestyle="dotted", label="Controlled VaR 95%")
+        ax.hist(controlled_losses, bins=50, alpha=0.55, label="Controlled")
+        ax.axvline(controlled_metrics["VaR 95%"], linestyle="dotted", linewidth=2, label="Controlled VaR 95%")
 
     ax.set_xlabel("Annual Loss ($)")
     ax.set_ylabel("Frequency")
-    ax.legend()
     ax.set_title("Annual Loss Distribution")
+    ax.legend()
+    fig.tight_layout()
     return fig
 
 
 def make_tornado_figure(results, sens_pct):
+    _apply_exec_style()
+
     labels = [r[0] for r in results]
     lows = [r[1] for r in results]
     highs = [r[2] for r in results]
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(10, 6))
+    fig.patch.set_facecolor("white")
     y = np.arange(len(labels))
 
-    ax.barh(y, highs, alpha=0.7, label=f"+{sens_pct}%")
-    ax.barh(y, lows, alpha=0.7, label=f"-{sens_pct}%")
-    ax.axvline(0, linestyle="dashed")
+    ax.barh(y, highs, alpha=0.75, label=f"+{sens_pct}%")
+    ax.barh(y, lows, alpha=0.75, label=f"-{sens_pct}%")
+    ax.axvline(0, linestyle="dashed", linewidth=1.5)
 
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
     ax.set_xlabel("Change in Expected Annual Loss ($)")
     ax.set_title("Sensitivity of EAL to each input (Tornado Plot)")
     ax.legend()
+
+    # IMPORTANT: prevent label cutoff
+    fig.subplots_adjust(left=0.35)
     return fig
 
 
@@ -101,24 +120,31 @@ def export_pdf_report(
     inputs: dict,
     controls: dict,
     baseline_metrics: dict,
-    controlled_metrics: dict | None,
-    rosi: float | None,
-    net_benefit: float | None,
+    controlled_metrics,
+    rosi,
+    net_benefit,
     fig_dist,
-    fig_tornado=None
+    fig_tornado=None,
 ):
     """
     Professional multi-page PDF using Matplotlib PdfPages (no extra dependencies).
+    Pages:
+      1) Cover + Executive summary metrics
+      2) Controls Summary
+      3) Distribution chart
+      4) Tornado chart (optional)
     """
+    footer_text = "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)"
+
     with PdfPages(out_path) as pdf:
 
         # -------------------------
         # Page 1: Cover + Summary
         # -------------------------
-        fig = plt.figure(figsize=(8.27, 11.69))  # A4 portrait in inches
+        fig = plt.figure(figsize=(8.27, 11.69))  # A4 portrait
         fig.patch.set_facecolor("white")
 
-        # Logo
+        # Logo block
         if logo_path and os.path.exists(logo_path):
             try:
                 img = mpimg.imread(logo_path)
@@ -128,20 +154,20 @@ def export_pdf_report(
             except Exception:
                 pass
 
-        ax = fig.add_axes([0.08, 0.08, 0.84, 0.76])
+        ax = fig.add_axes([0.08, 0.10, 0.84, 0.74])
         ax.axis("off")
 
         ax.text(0.0, 0.98, "CYBER RISK QUANTIFICATION", fontsize=20, fontweight="bold", va="top")
         ax.text(0.0, 0.94, "Executive Risk Assessment Report", fontsize=13, color="gray")
-        ax.axhline(0.92, xmin=0, xmax=1, linewidth=1)
-        ax.text(0.0, 0.93, f"Generated: {created_at}", fontsize=10, va="top")
-        ax.text(0.0, 0.90, f"Stress scenario: {stress_mode} (multiplier = {shock:.2f})", fontsize=10, va="top")
-        ax.text(0.0, 0.87, f"Effective threat frequency λ: {lam_effective:.2f} events/year", fontsize=10, va="top")
+        ax.plot([0.0, 1.0], [0.92, 0.92], color="black", linewidth=1)
 
-        # Baseline block
-        ax.text(0.0, 0.80, "Baseline Metrics", fontsize=13, fontweight="bold", va="top")
+        ax.text(0.0, 0.90, f"Generated: {created_at}", fontsize=10)
+        ax.text(0.0, 0.87, f"Stress scenario: {stress_mode} (multiplier = {shock:.2f})", fontsize=10)
+        ax.text(0.0, 0.84, f"Effective threat frequency λ: {lam_effective:.2f} events/year", fontsize=10)
+
+        ax.text(0.0, 0.77, "Baseline Metrics", fontsize=13, fontweight="bold")
         ax.text(
-            0.0, 0.76,
+            0.0, 0.73,
             "\n".join([
                 f"EAL (Expected Annual Loss): ${baseline_metrics['Expected Annual Loss']:,.0f}",
                 f"Probability of Breach-Year: {baseline_metrics['Probability of Breach-Year']:.2%}",
@@ -150,9 +176,9 @@ def export_pdf_report(
             fontsize=11, va="top"
         )
 
-        y = 0.62
+        y = 0.58
         if controlled_metrics is not None:
-            ax.text(0.0, y, "With Controls", fontsize=13, fontweight="bold", va="top")
+            ax.text(0.0, y, "With Controls", fontsize=13, fontweight="bold")
             ax.text(
                 0.0, y - 0.04,
                 "\n".join([
@@ -165,7 +191,7 @@ def export_pdf_report(
 
             y2 = y - 0.18
             if rosi is not None and net_benefit is not None:
-                ax.text(0.0, y2, "Investment Summary", fontsize=13, fontweight="bold", va="top")
+                ax.text(0.0, y2, "Investment Summary", fontsize=13, fontweight="bold")
                 ax.text(
                     0.0, y2 - 0.04,
                     "\n".join([
@@ -176,31 +202,35 @@ def export_pdf_report(
                     fontsize=11, va="top"
                 )
 
+                # Strategic interpretation
+                ax.text(
+                    0.0, y2 - 0.16,
+                    "Strategic Interpretation: Under current assumptions, controls materially reduce expected losses\n"
+                    "and provide strong financial justification.",
+                    fontsize=11,
+                    fontweight="bold",
+                    va="top"
+                )
+
         ax.text(
             0.0, 0.06,
             "Note: Scenario-based Monte Carlo model. Results depend on selected assumptions.",
             fontsize=9, color="gray", va="bottom"
         )
 
+        add_pdf_footer(fig, footer_text)
         pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
-ax.text(
-    0.0, 0.02,
-    "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
-    fontsize=8,
-    color="gray",
-    va="bottom"
-)
+
         # -------------------------
         # Page 2: Controls Summary
         # -------------------------
         fig = plt.figure(figsize=(8.27, 11.69))
         fig.patch.set_facecolor("white")
-        ax = fig.add_axes([0.08, 0.08, 0.84, 0.84])
+        ax = fig.add_axes([0.08, 0.10, 0.84, 0.82])
         ax.axis("off")
 
         ax.text(0.0, 0.98, "Controls Summary", fontsize=16, fontweight="bold", va="top")
-
         ax.text(
             0.0, 0.90,
             "\n".join([
@@ -222,38 +252,23 @@ ax.text(
             fontsize=11, va="top"
         )
 
+        add_pdf_footer(fig, footer_text)
         pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
-ax.text(
-    0.0, 0.02,
-    "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
-    fontsize=8,
-    color="gray",
-    va="bottom"
-)
+
         # -------------------------
         # Page 3: Distribution plot
         # -------------------------
+        add_pdf_footer(fig_dist, footer_text)
         pdf.savefig(fig_dist, bbox_inches="tight")
-ax.text(
-    0.0, 0.02,
-    "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
-    fontsize=8,
-    color="gray",
-    va="bottom"
-)
+
         # -------------------------
         # Page 4: Tornado plot (optional)
         # -------------------------
         if fig_tornado is not None:
+            add_pdf_footer(fig_tornado, footer_text)
             pdf.savefig(fig_tornado, bbox_inches="tight")
-ax.text(
-    0.0, 0.02,
-    "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
-    fontsize=8,
-    color="gray",
-    va="bottom"
-)
+
 
 # =============================
 # Header (logo + title)
@@ -262,7 +277,7 @@ logo_path = os.path.join("assets", "aims_logo.png")
 
 h1, h2 = st.columns([1, 3], vertical_alignment="center")
 with h1:
-    safe_show_logo(logo_path, width=160)
+    safe_show_logo(logo_path, width=180)
 with h2:
     st.title("🛡️ Cyber Risk Quantification Dashboard")
     st.caption("Monte Carlo cyber risk model • Controls ROI/ROSI • Stress testing • Sensitivity • PDF export")
@@ -336,21 +351,21 @@ if stress_mode == "Custom":
 
 
 # =============================
-# Session state (store latest results)
+# Session state
 # =============================
 if "last" not in st.session_state:
     st.session_state.last = None
 
 
 # =============================
-# Main actions
+# Run simulation
 # =============================
 run = st.sidebar.button("Run Simulation")
+
 if run:
     shock = stress_multiplier(stress_mode, custom_shock)
     lam_effective = lam * shock
-
-    st.info(f"Stress scenario selected: {stress_mode}  →  λ becomes {lam_effective:.2f} events/year")
+    st.info(f"Stress scenario selected: {stress_mode} → λ becomes {lam_effective:.2f} events/year")
 
     # ---- Baseline
     baseline_losses = simulate_annual_losses(
@@ -382,9 +397,8 @@ if run:
         net_benefit = risk_reduction - annual_control_cost
         rosi = (net_benefit / annual_control_cost) if annual_control_cost > 0 else np.nan
 
-    # ---- Sensitivity (optional)
+    # ---- Sensitivity
     tornado_fig = None
-    tornado_results = None
     if run_sensitivity:
         base_eal = float(baseline_metrics["Expected Annual Loss"])
         delta = sens_pct / 100.0
@@ -432,25 +446,29 @@ if run:
             impact_low = eal_low - base_eal
             impact_high = eal_high - base_eal
             span = max(abs(impact_low), abs(impact_high))
+
             results.append((label, impact_low, impact_high, span))
 
         results.sort(key=lambda x: x[3], reverse=True)
-        tornado_results = results
         tornado_fig = make_tornado_figure(results, sens_pct)
 
     # ---- Figures
     dist_fig = make_distribution_figure(baseline_losses, baseline_metrics, controlled_losses, controlled_metrics)
 
-    # ---- Store everything
+    # ---- Store results
     st.session_state.last = {
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "stress_mode": stress_mode,
         "shock": shock,
         "lam_effective": lam_effective,
         "inputs": {
-            "trials": trials, "lam": lam, "p_vuln": p_vuln,
-            "asset_value": float(asset_value), "exposure_factor": exposure_factor,
-            "sev_mu": sev_mu, "sev_sigma": sev_sigma,
+            "trials": trials,
+            "lam": lam,
+            "p_vuln": p_vuln,
+            "asset_value": float(asset_value),
+            "exposure_factor": exposure_factor,
+            "sev_mu": sev_mu,
+            "sev_sigma": sev_sigma,
         },
         "controls": {
             "use_controls": use_controls,
@@ -470,7 +488,7 @@ if run:
 
 
 # =============================
-# Display results if available
+# Display results
 # =============================
 last = st.session_state.last
 
@@ -518,6 +536,7 @@ else:
         else:
             st.warning("Controls may not be cost-effective under these assumptions (net benefit ≤ 0).")
 
+    # Executive Summary (NO markdown triple quotes -> no star issues)
     st.subheader("🧾 Executive Summary")
 
     breach_base = baseline_metrics["Probability of Breach-Year"]
@@ -525,11 +544,9 @@ else:
     var_base = baseline_metrics["VaR 95%"]
 
     if controlled_metrics is None:
-        st.write(
-            f"Baseline risk: About {breach_base:.0%} chance of at least one successful breach in a year.\n\n"
-            f"Expected annual loss is approximately ${eal_base:,.0f}.\n\n"
-            f"In a bad year (worst 5%), losses may exceed ${var_base:,.0f}."
-        )
+        st.write(f"Baseline risk: About {breach_base:.0%} chance of at least one successful breach in a year.")
+        st.write(f"Expected annual loss is approximately ${eal_base:,.0f}.")
+        st.write(f"In a bad year (worst 5%), losses may exceed ${var_base:,.0f}.")
     else:
         breach_ctrl = controlled_metrics["Probability of Breach-Year"]
         eal_ctrl = controlled_metrics["Expected Annual Loss"]
@@ -539,15 +556,20 @@ else:
         eal_drop = eal_base - eal_ctrl
         var_drop = var_base - var_ctrl
 
+        st.write(f"Baseline risk: About {breach_base:.0%} chance of at least one successful breach in a year.")
+        st.write(f"Expected annual loss is approximately ${eal_base:,.0f}.")
+        st.write(f"In a bad year (worst 5%), losses may exceed ${var_base:,.0f}.")
+
+        st.write(f"With security controls: Breach-year likelihood drops to about {breach_ctrl:.0%}.")
+        st.write(f"Expected annual loss drops to about ${eal_ctrl:,.0f}.")
+        st.write(f"Bad-year threshold (VaR 95%) drops to ${var_ctrl:,.0f}.")
+
         st.write(
-            f"Baseline risk: About {breach_base:.0%} chance of at least one successful breach in a year.\n\n"
-            f"Expected annual loss is approximately ${eal_base:,.0f}.\n\n"
-            f"In a bad year (worst 5%), losses may exceed ${var_base:,.0f}.\n\n"
-            f"With security controls: Breach-year likelihood drops to about {breach_ctrl:.0%}.\n\n"
-            f"Expected annual loss drops to about ${eal_ctrl:,.0f}.\n\n"
-            f"Bad-year threshold (VaR 95%) drops to ${var_ctrl:,.0f}.\n\n"
             f"Estimated impact: breach probability decreases by {breach_drop:.0%}; "
-            f"EAL decreases by ${eal_drop:,.0f}; VaR 95% decreases by ${var_drop:,.0f}.\n\n"
+            f"EAL decreases by ${eal_drop:,.0f}; VaR 95% decreases by ${var_drop:,.0f}."
+        )
+
+        st.write(
             f"Investment view: If controls cost ${last['controls']['annual_control_cost']:,.0f} per year, "
             f"the estimated net benefit is ${last['net_benefit']:,.0f} per year, "
             f"with a ROSI of {last['rosi']:.0%}."
@@ -562,8 +584,9 @@ else:
         st.subheader("🧪 Sensitivity Analysis (Tornado Plot)")
         st.pyplot(last["fig_tornado"])
 
+    # PDF Export
     st.subheader("📄 Export Executive PDF (Professional)")
-    st.caption("Tip: Put your AIMS logo in assets/aims_logo.png (you already did).")
+    st.caption("Uses assets/aims_logo.png for branding on the cover page.")
 
     if st.button("Generate PDF Report"):
         tmp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
