@@ -236,7 +236,7 @@ logo_path = os.path.join("assets", "aims_logo.png")
 
 h1, h2 = st.columns([1, 3], vertical_alignment="center")
 with h1:
-    safe_show_logo(logo_path, width=220)
+    safe_show_logo(logo_path, width=160)
 with h2:
     st.title("🛡️ Cyber Risk Quantification Dashboard")
     st.caption("Monte Carlo cyber risk model • Controls ROI/ROSI • Stress testing • Sensitivity • PDF export")
@@ -319,8 +319,7 @@ if "last" not in st.session_state:
 # =============================
 # Main actions
 # =============================
-run = st.button("Run Simulation")
-
+run = st.sidebar.button("Run Simulation")
 if run:
     shock = stress_multiplier(stress_mode, custom_shock)
     lam_effective = lam * shock
@@ -455,7 +454,7 @@ else:
     baseline_metrics = last["baseline_metrics"]
     controlled_metrics = last["controlled_metrics"]
 
-    st.subheader("📊 Risk Metrics")
+    st.markdown("## 📊 Risk Metrics")
 
     if controlled_metrics is None:
         c1, c2, c3 = st.columns(3)
@@ -493,7 +492,7 @@ else:
         else:
             st.warning("Controls may not be cost-effective under these assumptions (net benefit ≤ 0).")
 
-    st.subheader("🧾 Executive Summary (Plain Language)")
+    st.subheader("🧾 Executive Summary")
 
     breach_base = baseline_metrics["Probability of Breach-Year"]
     eal_base = baseline_metrics["Expected Annual Loss"]
