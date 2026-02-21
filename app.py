@@ -131,7 +131,9 @@ def export_pdf_report(
         ax = fig.add_axes([0.08, 0.08, 0.84, 0.76])
         ax.axis("off")
 
-        ax.text(0.0, 0.98, "Cyber Risk Quantification – Executive Report", fontsize=18, fontweight="bold", va="top")
+        ax.text(0.0, 0.98, "CYBER RISK QUANTIFICATION", fontsize=20, fontweight="bold", va="top")
+        ax.text(0.0, 0.94, "Executive Risk Assessment Report", fontsize=13, color="gray")
+        ax.axhline(0.92, xmin=0, xmax=1, linewidth=1)
         ax.text(0.0, 0.93, f"Generated: {created_at}", fontsize=10, va="top")
         ax.text(0.0, 0.90, f"Stress scenario: {stress_mode} (multiplier = {shock:.2f})", fontsize=10, va="top")
         ax.text(0.0, 0.87, f"Effective threat frequency λ: {lam_effective:.2f} events/year", fontsize=10, va="top")
@@ -182,7 +184,13 @@ def export_pdf_report(
 
         pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
-
+ax.text(
+    0.0, 0.02,
+    "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
+    fontsize=8,
+    color="gray",
+    va="bottom"
+)
         # -------------------------
         # Page 2: Controls Summary
         # -------------------------
@@ -216,18 +224,36 @@ def export_pdf_report(
 
         pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
-
+ax.text(
+    0.0, 0.02,
+    "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
+    fontsize=8,
+    color="gray",
+    va="bottom"
+)
         # -------------------------
         # Page 3: Distribution plot
         # -------------------------
         pdf.savefig(fig_dist, bbox_inches="tight")
-
+ax.text(
+    0.0, 0.02,
+    "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
+    fontsize=8,
+    color="gray",
+    va="bottom"
+)
         # -------------------------
         # Page 4: Tornado plot (optional)
         # -------------------------
         if fig_tornado is not None:
             pdf.savefig(fig_tornado, bbox_inches="tight")
-
+ax.text(
+    0.0, 0.02,
+    "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
+    fontsize=8,
+    color="gray",
+    va="bottom"
+)
 
 # =============================
 # Header (logo + title)
