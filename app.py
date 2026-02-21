@@ -49,6 +49,25 @@ annual_control_cost = st.sidebar.number_input(
 )
 
 # -----------------------------
+# Sidebar: Sensitivity
+# -----------------------------
+st.sidebar.markdown("---")
+st.sidebar.header("Sensitivity Analysis")
+run_sensitivity = st.sidebar.checkbox("Run sensitivity analysis (slower)", value=False)
+sens_pct = st.sidebar.slider("Sensitivity change (%)", 5, 50, 20)
+
+# -----------------------------
+# Helper: compute EAL quickly
+# -----------------------------
+def compute_eal(trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_, sev_sigma_):
+    losses_ = simulate_annual_losses(
+        trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_, sev_sigma_
+    )
+    metrics_ = compute_risk_metrics(losses_)
+    return metrics_["Expected Annual Loss"]
+
+
+# -----------------------------
 # Run simulation
 # -----------------------------
 if st.button("Run Simulation"):
@@ -167,8 +186,7 @@ If controls cost ${annual_control_cost:,.0f} per year,
 the estimated net benefit is ${net_benefit:,.0f} per year,
 with a ROSI of {rosi:.0%}.
 """)
-
-        st.caption("This is a scenario-based Monte Carlo model. Results depend on the assumptions you select.")
+        st.caption("Scenario-based Monte Carlo model. Results depend on assumptions you select.")
 
     # -----------------------------
     # Distribution plot
@@ -187,6 +205,89 @@ with a ROSI of {rosi:.0%}.
     ax.set_ylabel("Frequency")
     ax.legend()
     st.pyplot(fig)
+
+    # -----------------------------
+    # Sensitivity Analysis (EAL drivers)
+    # -----------------------------
+    if run_sensitivity:
+        st.subheader("🧪 Sensitivity Analysis (What Drives Risk Most?)")
+        st.write(f"We vary each input by ±{sens_pct}% and measure how Expected Annual Loss (EAL) changes.")
+
+        base_eal = baseline_metrics["Expected Annual Loss"]
+        delta = sens_pct / 100
+
+        params = [
+            ("Threat frequency (λ)", "lam"),
+            ("Vulnerability probability (p)", "p_vuln"),
+            ("Asset value", "asset_value"),
+            ("Exposure factor", "exposure_factor"),
+            ("Severity mean (μ)", "sev_mu"),
+            ("Severity std (σ)", "sev_sigma"),
+        ]
+
+        results = []
+
+        for label, name in params:
+            # Create copies
+            lam_low, lam_high = lam, lam
+            p_low, p_high = p_vuln, p_vuln
+            av_low, av_high = asset_value, asset_value
+            ef_low, ef_high = exposure_factor, exposure_factor
+            mu_low, mu_high = sev_mu, sev_mu
+            sg_low, sg_high = sev_sigma, sev_sigma
+
+            # Adjust one parameter at a time
+            if name == "lam":
+                lam_low = lam * (1 - delta)
+                lam_high = lam * (1 + delta)
+            elif name == "p_vuln":
+                p_low = max(0.0, p_vuln * (1 - delta))
+                p_high = min(1.0, p_vuln * (1 + delta))
+            elif name == "asset_value":
+                av_low = asset_value * (1 - delta)
+                av_high = asset_value * (1 + delta)
+            elif name == "exposure_factor":
+                ef_low = max(0.0, exposure_factor * (1 - delta))
+                ef_high = min(1.0, exposure_factor * (1 + delta))
+            elif name == "sev_mu":
+                mu_low = max(0.0, sev_mu * (1 - delta))
+                mu_high = sev_mu * (1 + delta)
+            elif name == "sev_sigma":
+                sg_low = max(0.1, sev_sigma * (1 - delta))
+                sg_high = sev_sigma * (1 + delta)
+
+            eal_low = compute_eal(trials, lam_low, p_low, av_low, ef_low, mu_low, sg_low)
+            eal_high = compute_eal(trials, lam_high, p_high, av_high, ef_high, mu_high, sg_high)
+
+            # Impact range
+            impact_low = eal_low - base_eal
+            impact_high = eal_high - base_eal
+            span = max(abs(impact_low), abs(impact_high))
+
+            results.append((label, impact_low, impact_high, span))
+
+        # Sort by largest effect
+        results.sort(key=lambda x: x[3], reverse=True)
+
+        # Plot tornado-style bars (horizontal)
+        labels = [r[0] for r in results]
+        lows = [r[1] for r in results]
+        highs = [r[2] for r in results]
+
+        fig2, ax2 = plt.subplots()
+        y = np.arange(len(labels))
+
+        ax2.barh(y, highs, alpha=0.7, label=f"+{sens_pct}%")
+        ax2.barh(y, lows, alpha=0.7, label=f"-{sens_pct}%")
+
+        ax2.axvline(0, linestyle="dashed")
+        ax2.set_yticks(y)
+        ax2.set_yticklabels(labels)
+        ax2.set_xlabel("Change in Expected Annual Loss ($)")
+        ax2.set_title("Sensitivity of EAL to each input (Tornado-style)")
+
+        ax2.legend()
+        st.pyplot(fig2)
 
 else:
     st.info("Set parameters on the left, then click **Run Simulation**.")
