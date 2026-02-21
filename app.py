@@ -8,6 +8,7 @@ from risk_model import simulate_annual_losses, compute_risk_metrics
 # -----------------------------
 st.set_page_config(page_title="Cyber Risk Quant Dashboard", layout="wide")
 st.title("🛡️ Cyber Risk Quantification Dashboard")
+st.caption("Monte Carlo cyber risk model • Controls ROI/ROSI • Stress testing • Sensitivity")
 
 # -----------------------------
 # Sidebar: Inputs
@@ -19,7 +20,7 @@ lam = st.sidebar.slider("Threat Frequency (events/year)", 0.0, 20.0, 5.0)
 p_vuln = st.sidebar.slider("Vulnerability Probability", 0.0, 1.0, 0.3)
 
 asset_value = st.sidebar.number_input("Asset Value ($)", value=1000000, step=10000)
-exposure_factor = st.sidebar.slider("Exposure Factor (0-1)", 0.1, 1.0, 0.5)
+exposure_factor = st.sidebar.slider("Exposure Factor (0–1)", 0.1, 1.0, 0.5)
 
 sev_mu = st.sidebar.slider("Severity Mean (lognormal μ)", 0.0, 2.0, 0.5)
 sev_sigma = st.sidebar.slider("Severity Std (lognormal σ)", 0.1, 2.0, 1.0)
@@ -56,9 +57,8 @@ st.sidebar.header("Sensitivity Analysis")
 run_sensitivity = st.sidebar.checkbox("Run sensitivity analysis (slower)", value=False)
 sens_pct = st.sidebar.slider("Sensitivity change (%)", 5, 50, 20)
 
-
 # -----------------------------
-# Stress Testing
+# Sidebar: Stress Testing
 # -----------------------------
 st.sidebar.markdown("---")
 st.sidebar.header("Stress Testing")
@@ -71,6 +71,8 @@ stress_mode = st.sidebar.selectbox(
 custom_shock = 1.0
 if stress_mode == "Custom":
     custom_shock = st.sidebar.slider("Custom Threat Multiplier", 1.0, 5.0, 2.0)
+
+
 # -----------------------------
 # Helper: compute EAL quickly
 # -----------------------------
@@ -86,29 +88,37 @@ def compute_eal(trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_,
 # Run simulation
 # -----------------------------
 if st.button("Run Simulation"):
-# Apply stress multiplier
-if stress_mode == "Normal Year":
-    shock = 1.0
-elif stress_mode == "Elevated Threat Year":
-    shock = 1.5
-elif stress_mode == "Ransomware Wave":
-    shock = 2.5
-else:
-    shock = custom_shock
 
-lam_effective = lam * shock
+    # Apply stress multiplier
+    if stress_mode == "Normal Year":
+        shock = 1.0
+    elif stress_mode == "Elevated Threat Year":
+        shock = 1.5
+    elif stress_mode == "Ransomware Wave":
+        shock = 2.5
+    else:
+        shock = custom_shock
+
+    lam_effective = lam * shock
+
+    st.info(f"Stress scenario: **{stress_mode}** → threat frequency λ becomes **{lam_effective:.2f} events/year**")
+
+    # -----------------------------
     # Baseline simulation
-   baseline_losses = simulate_annual_losses(
-    trials, lam_effective, p_vuln, asset_value, exposure_factor, sev_mu, sev_sigma
-)
+    # -----------------------------
+    baseline_losses = simulate_annual_losses(
+        trials, lam_effective, p_vuln, asset_value, exposure_factor, sev_mu, sev_sigma
+    )
     baseline_metrics = compute_risk_metrics(baseline_losses)
 
+    # -----------------------------
     # Controlled simulation (if enabled)
+    # -----------------------------
     controlled_losses = None
     controlled_metrics = None
 
     if use_controls:
-        lam_control = lam * (1 - lambda_reduction / 100)
+        lam_control = lam_effective * (1 - lambda_reduction / 100)  # IMPORTANT: use lam_effective (stress-adjusted)
         p_control = p_vuln * (1 - vuln_reduction / 100)
         exposure_control = exposure_factor * (1 - severity_reduction / 100)
 
@@ -124,7 +134,7 @@ lam_effective = lam * shock
 
     if controlled_metrics is None:
         col1, col2, col3 = st.columns(3)
-        col1.metric("Expected Annual Loss", f"${baseline_metrics['Expected Annual Loss']:,.0f}")
+        col1.metric("Expected Annual Loss (EAL)", f"${baseline_metrics['Expected Annual Loss']:,.0f}")
         col2.metric("Probability of Breach-Year", f"{baseline_metrics['Probability of Breach-Year']:.2%}")
         col3.metric("VaR 95%", f"${baseline_metrics['VaR 95%']:,.0f}")
 
@@ -141,10 +151,11 @@ lam_effective = lam * shock
         with right:
             st.markdown("### With Controls")
             col4, col5, col6 = st.columns(3)
+            eal_delta = baseline_metrics["Expected Annual Loss"] - controlled_metrics["Expected Annual Loss"]
             col4.metric(
                 "EAL",
                 f"${controlled_metrics['Expected Annual Loss']:,.0f}",
-                delta=f"-${baseline_metrics['Expected Annual Loss'] - controlled_metrics['Expected Annual Loss']:,.0f}"
+                delta=f"-${eal_delta:,.0f}"
             )
             col5.metric("Breach-Year", f"{controlled_metrics['Probability of Breach-Year']:.2%}")
             col6.metric("VaR 95%", f"${controlled_metrics['VaR 95%']:,.0f}")
@@ -157,10 +168,7 @@ lam_effective = lam * shock
         risk_reduction = baseline_metrics["Expected Annual Loss"] - controlled_metrics["Expected Annual Loss"]
         net_benefit = risk_reduction - annual_control_cost
 
-        if annual_control_cost > 0:
-            rosi = net_benefit / annual_control_cost
-        else:
-            rosi = np.nan
+        rosi = (net_benefit / annual_control_cost) if annual_control_cost > 0 else np.nan
 
         colA, colB, colC, colD = st.columns(4)
         colA.metric("Annual Risk Reduction", f"${risk_reduction:,.0f}")
@@ -191,27 +199,26 @@ lam_effective = lam * shock
         var_drop = var_base - var_ctrl
 
         st.write(f"""
-Baseline risk:
-The model estimates about {breach_base:.0%} chance of at least one successful breach in a year.
-Expected annual loss is approximately ${eal_base:,.0f}.
-In a bad year (worst 5%), losses may exceed ${var_base:,.0f}.
+**Baseline risk (given your inputs):**
+- About **{breach_base:.0%}** chance of at least one successful breach in a year.
+- Expected annual loss (average) is about **${eal_base:,.0f}**.
+- In a bad year (worst 5%), losses may exceed **${var_base:,.0f}**.
 
-With security controls:
-Breach-year likelihood drops to about {breach_ctrl:.0%}.
-Expected annual loss drops to about ${eal_ctrl:,.0f}.
-Bad-year threshold (VaR 95%) drops to ${var_ctrl:,.0f}.
+**With security controls enabled:**
+- Breach-year likelihood drops to about **{breach_ctrl:.0%}**.
+- Expected annual loss drops to about **${eal_ctrl:,.0f}**.
+- Bad-year threshold (VaR 95%) drops to **${var_ctrl:,.0f}**.
 
-Estimated impact of controls:
-• Breach probability decreases by {breach_drop:.0%}
-• Expected annual loss decreases by ${eal_drop:,.0f}
-• VaR 95% decreases by ${var_drop:,.0f}
+**Estimated impact of controls:**
+- Breach probability decreases by **{breach_drop:.0%}**
+- Expected annual loss decreases by **${eal_drop:,.0f}**
+- VaR 95% decreases by **${var_drop:,.0f}**
 
-Investment view:
-If controls cost ${annual_control_cost:,.0f} per year,
-the estimated net benefit is ${net_benefit:,.0f} per year,
-with a ROSI of {rosi:.0%}.
+**Investment view:**
+If controls cost **${annual_control_cost:,.0f} per year**, the estimated net benefit is
+**${net_benefit:,.0f} per year**, with a ROSI of **{rosi:.0%}**.
 """)
-        st.caption("Scenario-based Monte Carlo model. Results depend on assumptions you select.")
+        st.caption("Scenario-based Monte Carlo model. Results depend on the assumptions you choose.")
 
     # -----------------------------
     # Distribution plot
@@ -253,24 +260,22 @@ with a ROSI of {rosi:.0%}.
         results = []
 
         for label, name in params:
-            # Create copies
-            lam_low, lam_high = lam, lam
+            lam_low, lam_high = lam_effective, lam_effective
             p_low, p_high = p_vuln, p_vuln
-            av_low, av_high = asset_value, asset_value
+            av_low, av_high = float(asset_value), float(asset_value)
             ef_low, ef_high = exposure_factor, exposure_factor
             mu_low, mu_high = sev_mu, sev_mu
             sg_low, sg_high = sev_sigma, sev_sigma
 
-            # Adjust one parameter at a time
             if name == "lam":
-                lam_low = lam * (1 - delta)
-                lam_high = lam * (1 + delta)
+                lam_low = lam_effective * (1 - delta)
+                lam_high = lam_effective * (1 + delta)
             elif name == "p_vuln":
                 p_low = max(0.0, p_vuln * (1 - delta))
                 p_high = min(1.0, p_vuln * (1 + delta))
             elif name == "asset_value":
-                av_low = asset_value * (1 - delta)
-                av_high = asset_value * (1 + delta)
+                av_low = av_low * (1 - delta)
+                av_high = av_high * (1 + delta)
             elif name == "exposure_factor":
                 ef_low = max(0.0, exposure_factor * (1 - delta))
                 ef_high = min(1.0, exposure_factor * (1 + delta))
@@ -284,17 +289,14 @@ with a ROSI of {rosi:.0%}.
             eal_low = compute_eal(trials, lam_low, p_low, av_low, ef_low, mu_low, sg_low)
             eal_high = compute_eal(trials, lam_high, p_high, av_high, ef_high, mu_high, sg_high)
 
-            # Impact range
             impact_low = eal_low - base_eal
             impact_high = eal_high - base_eal
             span = max(abs(impact_low), abs(impact_high))
 
             results.append((label, impact_low, impact_high, span))
 
-        # Sort by largest effect
         results.sort(key=lambda x: x[3], reverse=True)
 
-        # Plot tornado-style bars (horizontal)
         labels = [r[0] for r in results]
         lows = [r[1] for r in results]
         highs = [r[2] for r in results]
@@ -304,14 +306,14 @@ with a ROSI of {rosi:.0%}.
 
         ax2.barh(y, highs, alpha=0.7, label=f"+{sens_pct}%")
         ax2.barh(y, lows, alpha=0.7, label=f"-{sens_pct}%")
-
         ax2.axvline(0, linestyle="dashed")
+
         ax2.set_yticks(y)
         ax2.set_yticklabels(labels)
         ax2.set_xlabel("Change in Expected Annual Loss ($)")
         ax2.set_title("Sensitivity of EAL to each input (Tornado-style)")
-
         ax2.legend()
+
         st.pyplot(fig2)
 
 else:
