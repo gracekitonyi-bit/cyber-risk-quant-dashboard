@@ -56,6 +56,21 @@ st.sidebar.header("Sensitivity Analysis")
 run_sensitivity = st.sidebar.checkbox("Run sensitivity analysis (slower)", value=False)
 sens_pct = st.sidebar.slider("Sensitivity change (%)", 5, 50, 20)
 
+
+# -----------------------------
+# Stress Testing
+# -----------------------------
+st.sidebar.markdown("---")
+st.sidebar.header("Stress Testing")
+
+stress_mode = st.sidebar.selectbox(
+    "Stress Scenario",
+    ["Normal Year", "Elevated Threat Year", "Ransomware Wave", "Custom"]
+)
+
+custom_shock = 1.0
+if stress_mode == "Custom":
+    custom_shock = st.sidebar.slider("Custom Threat Multiplier", 1.0, 5.0, 2.0)
 # -----------------------------
 # Helper: compute EAL quickly
 # -----------------------------
@@ -71,11 +86,21 @@ def compute_eal(trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_,
 # Run simulation
 # -----------------------------
 if st.button("Run Simulation"):
+# Apply stress multiplier
+if stress_mode == "Normal Year":
+    shock = 1.0
+elif stress_mode == "Elevated Threat Year":
+    shock = 1.5
+elif stress_mode == "Ransomware Wave":
+    shock = 2.5
+else:
+    shock = custom_shock
 
+lam_effective = lam * shock
     # Baseline simulation
-    baseline_losses = simulate_annual_losses(
-        trials, lam, p_vuln, asset_value, exposure_factor, sev_mu, sev_sigma
-    )
+   baseline_losses = simulate_annual_losses(
+    trials, lam_effective, p_vuln, asset_value, exposure_factor, sev_mu, sev_sigma
+)
     baseline_metrics = compute_risk_metrics(baseline_losses)
 
     # Controlled simulation (if enabled)
