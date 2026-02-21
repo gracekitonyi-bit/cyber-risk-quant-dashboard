@@ -3,9 +3,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from risk_model import simulate_annual_losses, compute_risk_metrics
 
-from fpdf import FPDF
-import tempfile
 import os
+import tempfile
+from datetime import datetime
+from io import BytesIO
+
+# ReportLab (PDF) — no extra install needed in most environments
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import cm
+
 
 # -----------------------------
 # Page config
@@ -13,6 +20,7 @@ import os
 st.set_page_config(page_title="Cyber Risk Quant Dashboard", layout="wide")
 st.title("🛡️ Cyber Risk Quantification Dashboard")
 st.caption("Monte Carlo cyber risk model • Controls ROI/ROSI • Stress testing • Sensitivity • PDF export")
+
 
 # -----------------------------
 # Sidebar: Inputs
@@ -23,7 +31,7 @@ trials = st.sidebar.slider("Monte Carlo Trials", 1000, 20000, 10000, step=1000)
 lam = st.sidebar.slider("Threat Frequency (events/year)", 0.0, 20.0, 5.0)
 p_vuln = st.sidebar.slider("Vulnerability Probability", 0.0, 1.0, 0.3)
 
-asset_value = st.sidebar.number_input("Asset Value ($)", value=1000000, step=10000)
+asset_value = st.sidebar.number_input("Asset Value ($)", value=1_000_000, step=10_000)
 exposure_factor = st.sidebar.slider("Exposure Factor (0–1)", 0.1, 1.0, 0.5)
 
 sev_mu = st.sidebar.slider("Severity Mean (lognormal μ)", 0.0, 2.0, 0.5)
@@ -48,8 +56,8 @@ st.sidebar.header("Investment (ROI)")
 
 annual_control_cost = st.sidebar.number_input(
     "Annual control cost ($/year)",
-    value=250000,
-    step=10000,
+    value=250_000,
+    step=10_000,
     help="Estimated annual cost of the selected controls (licenses, staff time, training, etc.)"
 )
 
@@ -81,17 +89,16 @@ if stress_mode == "Custom":
 # Helper: compute EAL quickly
 # -----------------------------
 def compute_eal(trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_, sev_sigma_):
-    losses_ = simulate_annual_losses(
-        trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_, sev_sigma_
-    )
+    losses_ = simulate_annual_losses(trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_, sev_sigma_)
     metrics_ = compute_risk_metrics(losses_)
     return metrics_["Expected Annual Loss"]
 
 
 # -----------------------------
-# Helper: PDF generator
+# Helper: PDF generator (ReportLab)
 # -----------------------------
 def build_pdf_report(
+    logo_path,
     stress_mode,
     lam_effective,
     baseline_metrics,
@@ -99,95 +106,134 @@ def build_pdf_report(
     dist_plot_path,
     controlled_metrics=None,
     controlled_summary_lines=None,
-    dist_plot_control_path=None,
-    rosi=None,
-    annual_control_cost=None,
     tornado_plot_path=None,
+    controls_params=None,
+    annual_control_cost=None,
+    rosi=None,
 ):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=12)
-    pdf.add_page()
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    w, h = A4
 
-    # Title
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, "Cyber Risk Quantification - Executive Report", ln=True)
+    def header(title):
+        y = h - 2*cm
 
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 8, f"Stress scenario: {stress_mode}", ln=True)
-    pdf.cell(0, 8, f"Effective threat frequency (lambda): {lam_effective:.2f} events/year", ln=True)
-    pdf.ln(2)
+        # Logo if available
+        if logo_path and os.path.exists(logo_path):
+            try:
+                c.drawImage(logo_path, 1.5*cm, h - 3.2*cm, width=2.2*cm, height=2.2*cm, mask='auto')
+            except Exception:
+                pass
 
-    # Baseline Metrics
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Baseline Metrics", ln=True)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 6, "\n".join([
-        f"EAL (Expected Annual Loss): ${baseline_metrics['Expected Annual Loss']:,.0f}",
-        f"Probability of Breach-Year: {baseline_metrics['Probability of Breach-Year']:.2%}",
-        f"VaR 95%: ${baseline_metrics['VaR 95%']:,.0f}",
-    ]))
-    pdf.ln(2)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(4.0*cm, y, title)
 
-    # Baseline Summary
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Plain-Language Summary (Baseline)", ln=True)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 6, "\n".join(baseline_summary_lines))
-    pdf.ln(2)
+        c.setFont("Helvetica", 10)
+        c.drawRightString(w - 1.5*cm, y, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        c.setFont("Helvetica", 10)
+        c.drawString(4.0*cm, y - 0.6*cm, f"Stress scenario: {stress_mode} | Effective λ: {lam_effective:.2f} events/year")
+        c.line(1.5*cm, y - 1.0*cm, w - 1.5*cm, y - 1.0*cm)
+        return y - 1.6*cm
 
-    # Controlled section if present
-    if controlled_metrics is not None:
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.cell(0, 8, "With Controls", ln=True)
-        pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 6, "\n".join([
-            f"EAL: ${controlled_metrics['Expected Annual Loss']:,.0f}",
-            f"Probability of Breach-Year: {controlled_metrics['Probability of Breach-Year']:.2%}",
-            f"VaR 95%: ${controlled_metrics['VaR 95%']:,.0f}",
-        ]))
-        pdf.ln(1)
+    # -------- Page 1: Executive Summary ----------
+    y = header("Cyber Risk Quantification — Executive Report")
 
-        if annual_control_cost is not None and rosi is not None:
-            pdf.multi_cell(0, 6, "\n".join([
-                f"Annual control cost: ${annual_control_cost:,.0f}",
-                f"ROSI: {rosi:.0%}",
-            ]))
-            pdf.ln(1)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(1.5*cm, y, "Baseline metrics")
+    y -= 0.7*cm
+    c.setFont("Helvetica", 11)
+    c.drawString(1.8*cm, y, f"EAL: ${baseline_metrics['Expected Annual Loss']:,.0f}")
+    y -= 0.55*cm
+    c.drawString(1.8*cm, y, f"Probability of breach-year: {baseline_metrics['Probability of Breach-Year']:.2%}")
+    y -= 0.55*cm
+    c.drawString(1.8*cm, y, f"VaR 95%: ${baseline_metrics['VaR 95%']:,.0f}")
+    y -= 0.8*cm
 
-        if controlled_summary_lines is not None:
-            pdf.set_font("Helvetica", "B", 13)
-            pdf.cell(0, 8, "Plain-Language Summary (With Controls)", ln=True)
-            pdf.set_font("Helvetica", "", 11)
-            pdf.multi_cell(0, 6, "\n".join(controlled_summary_lines))
-            pdf.ln(2)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(1.5*cm, y, "Plain-language summary (baseline)")
+    y -= 0.65*cm
+    c.setFont("Helvetica", 11)
+    for line in baseline_summary_lines:
+        c.drawString(1.8*cm, y, f"- {line}")
+        y -= 0.55*cm
 
-    # Distribution Plot(s)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Annual Loss Distribution", ln=True)
-    pdf.ln(1)
+    if controlled_metrics is not None and controlled_summary_lines is not None:
+        y -= 0.4*cm
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1.5*cm, y, "With controls")
+        y -= 0.7*cm
+        c.setFont("Helvetica", 11)
+        c.drawString(1.8*cm, y, f"EAL: ${controlled_metrics['Expected Annual Loss']:,.0f}")
+        y -= 0.55*cm
+        c.drawString(1.8*cm, y, f"Probability of breach-year: {controlled_metrics['Probability of Breach-Year']:.2%}")
+        y -= 0.55*cm
+        c.drawString(1.8*cm, y, f"VaR 95%: ${controlled_metrics['VaR 95%']:,.0f}")
+        y -= 0.7*cm
 
-    # Insert baseline dist plot image
+        if annual_control_cost is not None and rosi is not None and not np.isnan(rosi):
+            c.drawString(1.8*cm, y, f"Annual control cost: ${annual_control_cost:,.0f}")
+            y -= 0.55*cm
+            c.drawString(1.8*cm, y, f"ROSI: {rosi:.0%}")
+            y -= 0.7*cm
+
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1.5*cm, y, "Plain-language summary (with controls)")
+        y -= 0.65*cm
+        c.setFont("Helvetica", 11)
+        for line in controlled_summary_lines:
+            if line.strip() == "":
+                y -= 0.2*cm
+                continue
+            c.drawString(1.8*cm, y, f"- {line}")
+            y -= 0.55*cm
+
+    c.setFont("Helvetica-Oblique", 9)
+    c.drawString(1.5*cm, 1.3*cm, "Note: Scenario-based Monte Carlo model. Results depend on the assumptions selected.")
+
+    # -------- Page 2: Controls summary ----------
+    if controlled_metrics is not None and controls_params is not None:
+        c.showPage()
+        y = header("Controls Summary")
+
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1.5*cm, y, "Selected control assumptions")
+        y -= 0.8*cm
+
+        c.setFont("Helvetica", 11)
+        for k, v in controls_params.items():
+            c.drawString(1.8*cm, y, f"{k}: {v}")
+            y -= 0.55*cm
+
+        if annual_control_cost is not None:
+            y -= 0.2*cm
+            c.drawString(1.8*cm, y, f"Annual control cost: ${annual_control_cost:,.0f}")
+            y -= 0.55*cm
+
+        if rosi is not None and not np.isnan(rosi):
+            c.drawString(1.8*cm, y, f"ROSI: {rosi:.0%}")
+            y -= 0.55*cm
+
+    # -------- Page 3: Distribution plot ----------
     if dist_plot_path and os.path.exists(dist_plot_path):
-        pdf.image(dist_plot_path, w=180)
-        pdf.ln(4)
+        c.showPage()
+        y = header("Annual Loss Distribution")
+        try:
+            c.drawImage(dist_plot_path, 1.5*cm, 3.0*cm, width=w - 3.0*cm, height=h - 6.5*cm, preserveAspectRatio=True, anchor='c')
+        except Exception:
+            pass
 
-    # Insert second plot if provided (combined plot still fine; but we keep optional)
-    if dist_plot_control_path and os.path.exists(dist_plot_control_path):
-        pdf.image(dist_plot_control_path, w=180)
-        pdf.ln(4)
-
-    # Tornado plot if present
+    # -------- Page 4: Tornado plot ----------
     if tornado_plot_path and os.path.exists(tornado_plot_path):
-        pdf.add_page()
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.cell(0, 8, "Sensitivity Analysis (Tornado Plot)", ln=True)
-        pdf.ln(2)
-        pdf.image(tornado_plot_path, w=180)
+        c.showPage()
+        y = header("Sensitivity Analysis (Tornado Plot)")
+        try:
+            c.drawImage(tornado_plot_path, 1.5*cm, 3.0*cm, width=w - 3.0*cm, height=h - 6.5*cm, preserveAspectRatio=True, anchor='c')
+        except Exception:
+            pass
 
-    # Save to bytes
-    tmp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    pdf.output(tmp_pdf.name)
-    return tmp_pdf.name
+    c.save()
+    buffer.seek(0)
+    return buffer
 
 
 # -----------------------------
@@ -195,7 +241,7 @@ def build_pdf_report(
 # -----------------------------
 if st.button("Run Simulation"):
 
-    # Apply stress multiplier
+    # Stress multiplier
     if stress_mode == "Normal Year":
         shock = 1.0
     elif stress_mode == "Elevated Threat Year":
@@ -206,30 +252,22 @@ if st.button("Run Simulation"):
         shock = custom_shock
 
     lam_effective = lam * shock
-    st.info(f"Stress scenario: **{stress_mode}** → threat frequency λ becomes **{lam_effective:.2f} events/year**")
+    st.info(f"Stress scenario: {stress_mode} → threat frequency λ becomes {lam_effective:.2f} events/year")
 
-    # -----------------------------
     # Baseline simulation
-    # -----------------------------
-    baseline_losses = simulate_annual_losses(
-        trials, lam_effective, p_vuln, asset_value, exposure_factor, sev_mu, sev_sigma
-    )
+    baseline_losses = simulate_annual_losses(trials, lam_effective, p_vuln, asset_value, exposure_factor, sev_mu, sev_sigma)
     baseline_metrics = compute_risk_metrics(baseline_losses)
 
-    # -----------------------------
-    # Controlled simulation (if enabled)
-    # -----------------------------
+    # Controlled simulation
     controlled_losses = None
     controlled_metrics = None
 
     if use_controls:
-        lam_control = lam_effective * (1 - lambda_reduction / 100)  # stress-adjusted
-        p_control = p_vuln * (1 - vuln_reduction / 100)
-        exposure_control = exposure_factor * (1 - severity_reduction / 100)
+        lam_control = lam_effective * (1 - lambda_reduction / 100.0)   # stress-adjusted
+        p_control = p_vuln * (1 - vuln_reduction / 100.0)
+        exposure_control = exposure_factor * (1 - severity_reduction / 100.0)
 
-        controlled_losses = simulate_annual_losses(
-            trials, lam_control, p_control, asset_value, exposure_control, sev_mu, sev_sigma
-        )
+        controlled_losses = simulate_annual_losses(trials, lam_control, p_control, asset_value, exposure_control, sev_mu, sev_sigma)
         controlled_metrics = compute_risk_metrics(controlled_losses)
 
     # -----------------------------
@@ -260,17 +298,12 @@ if st.button("Run Simulation"):
             st.markdown("### With Controls")
             col4, col5, col6 = st.columns(3)
             eal_delta = baseline_metrics["Expected Annual Loss"] - controlled_metrics["Expected Annual Loss"]
-            col4.metric(
-                "EAL",
-                f"${controlled_metrics['Expected Annual Loss']:,.0f}",
-                delta=f"-${eal_delta:,.0f}"
-            )
+            col4.metric("EAL", f"${controlled_metrics['Expected Annual Loss']:,.0f}", delta=f"-${eal_delta:,.0f}")
             col5.metric("Breach-Year", f"{controlled_metrics['Probability of Breach-Year']:.2%}")
             col6.metric("VaR 95%", f"${controlled_metrics['VaR 95%']:,.0f}")
 
         # ROI / ROSI
         st.subheader("💰 ROI / ROSI (Investment Value)")
-
         risk_reduction = baseline_metrics["Expected Annual Loss"] - controlled_metrics["Expected Annual Loss"]
         net_benefit = risk_reduction - annual_control_cost
         rosi = (net_benefit / annual_control_cost) if annual_control_cost > 0 else np.nan
@@ -287,7 +320,7 @@ if st.button("Run Simulation"):
             st.warning("⚠️ Controls may not be cost-effective under these assumptions (net benefit ≤ 0).")
 
     # -----------------------------
-    # Executive Summary (Plain Language)
+    # Executive Summary — NO STARS
     # -----------------------------
     st.subheader("🧾 Executive Summary (Plain Language)")
 
@@ -296,12 +329,13 @@ if st.button("Run Simulation"):
     var_base = baseline_metrics["VaR 95%"]
 
     baseline_summary_lines = [
-        f"Baseline risk: About {breach_base:.0%} chance of at least one successful breach in a year.",
-        f"Expected annual loss is approximately ${eal_base:,.0f}.",
+        f"About {breach_base:.0%} chance of at least one breach in a year.",
+        f"Expected annual loss is about ${eal_base:,.0f}.",
         f"In a bad year (worst 5%), losses may exceed ${var_base:,.0f}.",
     ]
 
     controlled_summary_lines = None
+    controls_params = None
 
     if controlled_metrics is not None:
         breach_ctrl = controlled_metrics["Probability of Breach-Year"]
@@ -313,46 +347,58 @@ if st.button("Run Simulation"):
         var_drop = var_base - var_ctrl
 
         controlled_summary_lines = [
-            f"With security controls: breach-year likelihood drops to about {breach_ctrl:.0%}.",
+            f"Breach-year likelihood drops to about {breach_ctrl:.0%}.",
             f"Expected annual loss drops to about ${eal_ctrl:,.0f}.",
             f"Bad-year threshold (VaR 95%) drops to ${var_ctrl:,.0f}.",
             "",
-            f"Estimated impact: breach probability decreases by {breach_drop:.0%};",
-            f"EAL decreases by ${eal_drop:,.0f}; VaR 95% decreases by ${var_drop:,.0f}.",
+            f"Breach probability decreases by about {breach_drop:.0%}.",
+            f"Expected annual loss decreases by about ${eal_drop:,.0f}.",
+            f"VaR 95% decreases by about ${var_drop:,.0f}.",
         ]
 
-        st.write(
+        st.markdown(
             f"""
-Baseline risk: The model estimates about **{breach_base:.0%}** chance of at least one successful breach in a year.
-Expected annual loss is approximately **${eal_base:,.0f}**.
-In a bad year (worst 5%), losses may exceed **${var_base:,.0f}**.
+Baseline risk:
+- {baseline_summary_lines[0]}
+- {baseline_summary_lines[1]}
+- {baseline_summary_lines[2]}
 
-With security controls: Breach-year likelihood drops to about **{breach_ctrl:.0%}**.
-Expected annual loss drops to about **${eal_ctrl:,.0f}**.
-Bad-year threshold (VaR 95%) drops to **${var_ctrl:,.0f}**.
+With security controls:
+- {controlled_summary_lines[0]}
+- {controlled_summary_lines[1]}
+- {controlled_summary_lines[2]}
 
-Estimated impact of controls:
-• Breach probability decreases by **{breach_drop:.0%}**
-• Expected annual loss decreases by **${eal_drop:,.0f}**
-• VaR 95% decreases by **${var_drop:,.0f}**
+Estimated impact:
+- {controlled_summary_lines[4]}
+- {controlled_summary_lines[5]}
+- {controlled_summary_lines[6]}
 """
         )
 
         if rosi is not None and net_benefit is not None:
-            st.write(
+            st.markdown(
                 f"""
-Investment view: If controls cost **${annual_control_cost:,.0f} per year**,
-the estimated net benefit is **${net_benefit:,.0f} per year**,
-with a ROSI of **{rosi:.0%}**.
+Investment view:
+- Controls cost: ${annual_control_cost:,.0f} per year
+- Estimated net benefit: ${net_benefit:,.0f} per year
+- ROSI: {rosi:.0%}
 """
             )
 
+        controls_params = {
+            "Threat reduction (%)": f"{lambda_reduction}%",
+            "Vulnerability reduction (%)": f"{vuln_reduction}%",
+            "Impact reduction (%)": f"{severity_reduction}%",
+            "Stress scenario": stress_mode,
+        }
+
     else:
-        st.write(
+        st.markdown(
             f"""
-Baseline risk: The model estimates about **{breach_base:.0%}** chance of at least one successful breach in a year.
-Expected annual loss is approximately **${eal_base:,.0f}**.
-In a bad year (worst 5%), losses may exceed **${var_base:,.0f}**.
+Baseline risk:
+- {baseline_summary_lines[0]}
+- {baseline_summary_lines[1]}
+- {baseline_summary_lines[2]}
 """
         )
 
@@ -376,7 +422,7 @@ In a bad year (worst 5%), losses may exceed **${var_base:,.0f}**.
     ax.legend()
     st.pyplot(fig)
 
-    # Save distribution plot to temp for PDF
+    # Save dist plot for PDF
     dist_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     fig.savefig(dist_tmp.name, dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -384,14 +430,14 @@ In a bad year (worst 5%), losses may exceed **${var_base:,.0f}**.
     tornado_path = None
 
     # -----------------------------
-    # Sensitivity Analysis
+    # Sensitivity Analysis (Tornado)
     # -----------------------------
     if run_sensitivity:
         st.subheader("🧪 Sensitivity Analysis (What Drives Risk Most?)")
         st.write(f"We vary each input by ±{sens_pct}% and measure how Expected Annual Loss (EAL) changes.")
 
         base_eal = baseline_metrics["Expected Annual Loss"]
-        delta = sens_pct / 100
+        delta = sens_pct / 100.0
 
         params = [
             ("Threat frequency (λ)", "lam"),
@@ -461,45 +507,40 @@ In a bad year (worst 5%), losses may exceed **${var_base:,.0f}**.
 
         st.pyplot(fig2)
 
-        # Save tornado plot for PDF
         tornado_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         fig2.savefig(tornado_tmp.name, dpi=200, bbox_inches="tight")
         plt.close(fig2)
         tornado_path = tornado_tmp.name
 
     # -----------------------------
-    # PDF Export
+    # PDF Export (ReportLab)
     # -----------------------------
     st.subheader("📄 Export Executive PDF")
 
-    if st.button("Generate PDF Report"):
-        pdf_path = build_pdf_report(
-            stress_mode=stress_mode,
-            lam_effective=lam_effective,
-            baseline_metrics=baseline_metrics,
-            baseline_summary_lines=baseline_summary_lines,
-            dist_plot_path=dist_tmp.name,
-            controlled_metrics=controlled_metrics,
-            controlled_summary_lines=controlled_summary_lines,
-            dist_plot_control_path=None,
-            rosi=rosi,
-            annual_control_cost=annual_control_cost if controlled_metrics is not None else None,
-            tornado_plot_path=tornado_path
-        )
+    # Optional logo: put a logo at assets/logo.png in your repo
+    logo_path = "assets/logo.png"  # you can change this if needed
 
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                label="⬇️ Download Executive Report (PDF)",
-                data=f.read(),
-                file_name="Cyber_Risk_Executive_Report.pdf",
-                mime="application/pdf"
-            )
+    pdf_bytes = build_pdf_report(
+        logo_path=logo_path,
+        stress_mode=stress_mode,
+        lam_effective=lam_effective,
+        baseline_metrics=baseline_metrics,
+        baseline_summary_lines=baseline_summary_lines,
+        dist_plot_path=dist_tmp.name,
+        controlled_metrics=controlled_metrics,
+        controlled_summary_lines=controlled_summary_lines,
+        tornado_plot_path=tornado_path,
+        controls_params=controls_params,
+        annual_control_cost=annual_control_cost if controlled_metrics is not None else None,
+        rosi=rosi,
+    )
 
-        # Clean up pdf file (images are cleaned by OS later; safe to leave)
-        try:
-            os.remove(pdf_path)
-        except Exception:
-            pass
+    st.download_button(
+        label="⬇️ Download Executive Report (PDF)",
+        data=pdf_bytes,
+        file_name="Cyber_Risk_Executive_Report.pdf",
+        mime="application/pdf"
+    )
 
 else:
-    st.info("Set parameters on the left, then click **Run Simulation**.")
+    st.info("Set parameters on the left, then click Run Simulation.")
