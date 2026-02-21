@@ -31,12 +31,13 @@ st.sidebar.markdown("---")
 st.sidebar.header("Security Controls")
 
 use_controls = st.sidebar.checkbox("Enable Security Controls", value=True)
-
 lambda_reduction = st.sidebar.slider("Threat Reduction (%)", 0, 90, 30)
 vuln_reduction = st.sidebar.slider("Vulnerability Reduction (%)", 0, 90, 40)
 severity_reduction = st.sidebar.slider("Impact Reduction (%)", 0, 90, 25)
 
-# ROI inputs (only meaningful if controls are enabled)
+# -----------------------------
+# Sidebar: ROI Inputs
+# -----------------------------
 st.sidebar.markdown("---")
 st.sidebar.header("Investment (ROI)")
 
@@ -54,17 +55,11 @@ if st.button("Run Simulation"):
 
     # Baseline simulation
     baseline_losses = simulate_annual_losses(
-        trials,
-        lam,
-        p_vuln,
-        asset_value,
-        exposure_factor,
-        sev_mu,
-        sev_sigma
+        trials, lam, p_vuln, asset_value, exposure_factor, sev_mu, sev_sigma
     )
     baseline_metrics = compute_risk_metrics(baseline_losses)
 
-    # Apply controls if enabled
+    # Controlled simulation (if enabled)
     controlled_losses = None
     controlled_metrics = None
 
@@ -74,18 +69,12 @@ if st.button("Run Simulation"):
         exposure_control = exposure_factor * (1 - severity_reduction / 100)
 
         controlled_losses = simulate_annual_losses(
-            trials,
-            lam_control,
-            p_control,
-            asset_value,
-            exposure_control,
-            sev_mu,
-            sev_sigma
+            trials, lam_control, p_control, asset_value, exposure_control, sev_mu, sev_sigma
         )
         controlled_metrics = compute_risk_metrics(controlled_losses)
 
     # -----------------------------
-    # Layout: Metrics
+    # Risk metrics section
     # -----------------------------
     st.subheader("📊 Risk Metrics")
 
@@ -96,7 +85,6 @@ if st.button("Run Simulation"):
         col3.metric("VaR 95%", f"${baseline_metrics['VaR 95%']:,.0f}")
 
     else:
-        # Side-by-side comparison
         left, right = st.columns(2)
 
         with left:
@@ -118,7 +106,7 @@ if st.button("Run Simulation"):
             col6.metric("VaR 95%", f"${controlled_metrics['VaR 95%']:,.0f}")
 
         # -----------------------------
-        # ROI / ROSI
+        # ROI / ROSI section
         # -----------------------------
         st.subheader("💰 ROI / ROSI (Investment Value)")
 
@@ -136,16 +124,29 @@ if st.button("Run Simulation"):
         colC.metric("Net Benefit", f"${net_benefit:,.0f}")
         colD.metric("ROSI", f"{rosi:.2%}" if not np.isnan(rosi) else "N/A")
 
-        # Decision message
         if net_benefit > 0:
             st.success("✅ Controls look cost-effective under these assumptions (net benefit > 0).")
         else:
             st.warning("⚠️ Controls may not be cost-effective under these assumptions (net benefit ≤ 0).")
-        # -----------------------------
-        # Executive Summary (plain language)
-st.subheader("🧾 Executive Summary (Plain Language)")
 
-st.write(f"""
+        # -----------------------------
+        # Executive Summary (Plain Language)
+        # -----------------------------
+        st.subheader("🧾 Executive Summary (Plain Language)")
+
+        breach_base = baseline_metrics["Probability of Breach-Year"]
+        eal_base = baseline_metrics["Expected Annual Loss"]
+        var_base = baseline_metrics["VaR 95%"]
+
+        breach_ctrl = controlled_metrics["Probability of Breach-Year"]
+        eal_ctrl = controlled_metrics["Expected Annual Loss"]
+        var_ctrl = controlled_metrics["VaR 95%"]
+
+        breach_drop = breach_base - breach_ctrl
+        eal_drop = eal_base - eal_ctrl
+        var_drop = var_base - var_ctrl
+
+        st.write(f"""
 Baseline risk:
 The model estimates about {breach_base:.0%} chance of at least one successful breach in a year.
 Expected annual loss is approximately ${eal_base:,.0f}.
@@ -167,7 +168,8 @@ the estimated net benefit is ${net_benefit:,.0f} per year,
 with a ROSI of {rosi:.0%}.
 """)
 
-st.caption("This is a scenario-based Monte Carlo model. Results depend on assumptions.")
+        st.caption("This is a scenario-based Monte Carlo model. Results depend on the assumptions you select.")
+
     # -----------------------------
     # Distribution plot
     # -----------------------------
@@ -175,8 +177,6 @@ st.caption("This is a scenario-based Monte Carlo model. Results depend on assump
 
     fig, ax = plt.subplots()
     ax.hist(baseline_losses, bins=50, alpha=0.6, label="Baseline")
-
-    # Baseline VaR line
     ax.axvline(baseline_metrics["VaR 95%"], linestyle="dashed", label="Baseline VaR 95%")
 
     if controlled_losses is not None:
