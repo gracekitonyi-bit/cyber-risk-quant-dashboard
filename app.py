@@ -143,44 +143,31 @@ if st.button("Run Simulation"):
             st.warning("⚠️ Controls may not be cost-effective under these assumptions (net benefit ≤ 0).")
         # -----------------------------
         # Executive Summary (plain language)
-        # -----------------------------
-        st.subheader("🧾 Executive Summary (Plain Language)")
+st.subheader("🧾 Executive Summary (Plain Language)")
 
-        breach_base = baseline_metrics["Probability of Breach-Year"]
-        eal_base = baseline_metrics["Expected Annual Loss"]
-        var_base = baseline_metrics["VaR 95%"]
+st.write(f"""
+Baseline risk:
+The model estimates about {breach_base:.0%} chance of at least one successful breach in a year.
+Expected annual loss is approximately ${eal_base:,.0f}.
+In a bad year (worst 5%), losses may exceed ${var_base:,.0f}.
 
-        breach_ctrl = controlled_metrics["Probability of Breach-Year"]
-        eal_ctrl = controlled_metrics["Expected Annual Loss"]
-        var_ctrl = controlled_metrics["VaR 95%"]
+With security controls:
+Breach-year likelihood drops to about {breach_ctrl:.0%}.
+Expected annual loss drops to about ${eal_ctrl:,.0f}.
+Bad-year threshold (VaR 95%) drops to ${var_ctrl:,.0f}.
 
-        breach_drop = breach_base - breach_ctrl
-        eal_drop = eal_base - eal_ctrl
-        var_drop = var_base - var_ctrl
+Estimated impact of controls:
+• Breach probability decreases by {breach_drop:.0%}
+• Expected annual loss decreases by ${eal_drop:,.0f}
+• VaR 95% decreases by ${var_drop:,.0f}
 
-        # Simple interpretation text
-        summary_text = f"""
-**What this means (based on the assumptions you selected):**
+Investment view:
+If controls cost ${annual_control_cost:,.0f} per year,
+the estimated net benefit is ${net_benefit:,.0f} per year,
+with a ROSI of {rosi:.0%}.
+""")
 
-- **Baseline risk:** The model estimates about **{breach_base:.0%}** chance of at least one successful breach in a year.
-  The **expected annual loss** is approximately **${eal_base:,.0f}**, and in a **bad year (worst 5%)** losses may exceed **${var_base:,.0f}**.
-
-- **With security controls:** The breach-year likelihood drops to about **{breach_ctrl:.0%}**.
-  The expected annual loss drops to about **${eal_ctrl:,.0f}**, and the bad-year threshold (VaR 95%) drops to **${var_ctrl:,.0f}**.
-
-- **Estimated impact of controls:**  
-  **Breach-year probability decreases by {breach_drop:.0%}**,  
-  **expected annual loss decreases by ${eal_drop:,.0f}**,  
-  and **VaR 95% decreases by ${var_drop:,.0f}**.
-
-- **Investment view:** If controls cost **${annual_control_cost:,.0f}/year**, the model estimates a **net benefit of ${net_benefit:,.0f}/year** and a **ROSI of {rosi:.0%}**.
-        """
-
-        st.markdown(summary_text)
-
-        st.caption(
-            "Note: This is a scenario-based Monte Carlo model (not a guaranteed prediction). Results depend on the assumptions and inputs."
-        )
+st.caption("This is a scenario-based Monte Carlo model. Results depend on assumptions.")
     # -----------------------------
     # Distribution plot
     # -----------------------------
