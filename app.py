@@ -558,7 +558,7 @@ else:
         else:
             st.warning("Controls may not be cost-effective under these assumptions (net benefit ≤ 0).")
 
-    st.subheader("🧾 Executive Summary (Plain Language)")
+    st.subheader("🧾 Executive Summary")
     breach_base = baseline_metrics["Probability of Breach-Year"]
     eal_base = baseline_metrics["Expected Annual Loss"]
     var_base = baseline_metrics["VaR 95%"]
