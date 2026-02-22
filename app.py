@@ -1,3 +1,4 @@
+st.write("APP VERSION: 2026-02-22 23:59 (no ticklabel_format)")
 import os
 import tempfile
 from datetime import datetime
