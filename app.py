@@ -1,13 +1,13 @@
-st.write("APP VERSION: 2026-02-22 23:59 (no ticklabel_format)")
 import os
 import tempfile
 from datetime import datetime
+from typing import Optional, Dict, Any, Tuple
 
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.image as mpimg
+from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.ticker import FuncFormatter
 from matplotlib.patches import Rectangle
 
@@ -15,15 +15,21 @@ from risk_model import simulate_annual_losses, compute_risk_metrics
 
 
 # =============================
-# Page config
+# Page config (MUST be first st.* call)
 # =============================
 st.set_page_config(page_title="Cyber Risk Quant Dashboard", layout="wide")
 
 
 # =============================
+# Version (safe)
+# =============================
+APP_VERSION = "2026-02-22 23:59 (no ticklabel_format)"
+
+
+# =============================
 # Helpers
 # =============================
-def safe_show_logo(logo_path: str, width: int = 240):
+def safe_show_logo(logo_path: str, width: int = 220) -> None:
     """Show logo in Streamlit without crashing if image/path has issues."""
     if not logo_path or not os.path.exists(logo_path):
         return
@@ -44,7 +50,15 @@ def stress_multiplier(stress_mode: str, custom_shock: float) -> float:
     return float(custom_shock)
 
 
-def compute_eal(trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_, sev_sigma_):
+def compute_eal(
+    trials_: int,
+    lam_: float,
+    p_vuln_: float,
+    asset_value_: float,
+    exposure_factor_: float,
+    sev_mu_: float,
+    sev_sigma_: float,
+) -> float:
     losses_ = simulate_annual_losses(
         trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_, sev_sigma_
     )
@@ -52,7 +66,7 @@ def compute_eal(trials_, lam_, p_vuln_, asset_value_, exposure_factor_, sev_mu_,
     return float(metrics_["Expected Annual Loss"])
 
 
-def _fmt_money(x, pos=None):
+def _fmt_money(x, pos=None) -> str:
     x = float(x)
     ax = abs(x)
     if ax >= 1e9:
@@ -64,27 +78,44 @@ def _fmt_money(x, pos=None):
     return f"${x:,.0f}"
 
 
-def make_distribution_figure(baseline_losses, baseline_metrics, controlled_losses=None, controlled_metrics=None):
-    fig, ax = plt.subplots(figsize=(10, 5.5))
+def make_distribution_figure(
+    baseline_losses: np.ndarray,
+    baseline_metrics: Dict[str, Any],
+    controlled_losses: Optional[np.ndarray] = None,
+    controlled_metrics: Optional[Dict[str, Any]] = None,
+):
+    """No ticklabel_format; only FuncFormatter => avoids your Streamlit error."""
+    fig, ax = plt.subplots(figsize=(10, 5.6))
+
     ax.hist(baseline_losses, bins=50, alpha=0.65, label="Baseline")
-    ax.axvline(baseline_metrics["VaR 95%"], linestyle="dashed", linewidth=2, label="Baseline VaR 95%")
+    ax.axvline(
+        baseline_metrics["VaR 95%"],
+        linestyle="dashed",
+        linewidth=2,
+        label="Baseline VaR 95%",
+    )
 
     if controlled_losses is not None and controlled_metrics is not None:
         ax.hist(controlled_losses, bins=50, alpha=0.65, label="With Controls")
-        ax.axvline(controlled_metrics["VaR 95%"], linestyle="dotted", linewidth=2, label="Controls VaR 95%")
+        ax.axvline(
+            controlled_metrics["VaR 95%"],
+            linestyle="dotted",
+            linewidth=2,
+            label="Controls VaR 95%",
+        )
 
     ax.set_title("Annual Loss Distribution", pad=10)
     ax.set_xlabel("Annual Loss")
     ax.set_ylabel("Frequency")
+
     ax.xaxis.set_major_formatter(FuncFormatter(_fmt_money))
-    ax.ticklabel_format(style="plain", axis="x")  # no 1e8
     ax.grid(True, axis="y", alpha=0.2)
     ax.legend()
     fig.tight_layout()
     return fig
 
 
-def make_tornado_figure(results, sens_pct):
+def make_tornado_figure(results, sens_pct: int):
     labels = [r[0] for r in results]
     lows = [r[1] for r in results]
     highs = [r[2] for r in results]
@@ -100,7 +131,6 @@ def make_tornado_figure(results, sens_pct):
     ax.set_yticklabels(labels)
     ax.set_xlabel("Change in Expected Annual Loss (EAL)")
     ax.xaxis.set_major_formatter(FuncFormatter(_fmt_money))
-    ax.ticklabel_format(style="plain", axis="x")
     ax.set_title("Sensitivity Analysis (Tornado Plot)", pad=10)
     ax.grid(True, axis="x", alpha=0.2)
     ax.legend()
@@ -110,9 +140,13 @@ def make_tornado_figure(results, sens_pct):
 
 def _footer(fig):
     fig.text(
-        0.5, 0.02,
+        0.5,
+        0.02,
         "Prepared by Grace Nzambali Kitonyi | African Institute for Mathematical Sciences (AIMS Rwanda)",
-        ha="center", va="bottom", fontsize=8, color="gray"
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        color="gray",
     )
 
 
@@ -123,18 +157,16 @@ def export_pdf_report(
     stress_mode: str,
     shock: float,
     lam_effective: float,
-    inputs: dict,
-    controls: dict,
-    baseline_metrics: dict,
-    controlled_metrics: dict | None,
-    rosi: float | None,
-    net_benefit: float | None,
+    inputs: Dict[str, Any],
+    controls: Dict[str, Any],
+    baseline_metrics: Dict[str, Any],
+    controlled_metrics: Optional[Dict[str, Any]],
+    rosi: Optional[float],
+    net_benefit: Optional[float],
     dist_fig,
     tornado_fig=None,
 ):
-    """
-    Professional multi-page PDF using Matplotlib PdfPages (no extra dependencies).
-    """
+    """Professional multi-page PDF using PdfPages only."""
     with PdfPages(out_path) as pdf:
 
         # =========================
@@ -143,11 +175,11 @@ def export_pdf_report(
         fig = plt.figure(figsize=(8.27, 11.69))  # A4 portrait
         fig.patch.set_facecolor("white")
 
-        # Logo strip
+        # Header/logo strip
         if logo_path and os.path.exists(logo_path):
             try:
                 img = mpimg.imread(logo_path)
-                ax_logo = fig.add_axes([0.08, 0.88, 0.84, 0.10])
+                ax_logo = fig.add_axes([0.08, 0.89, 0.84, 0.09])
                 ax_logo.imshow(img)
                 ax_logo.axis("off")
             except Exception:
@@ -164,9 +196,10 @@ def export_pdf_report(
         ax.text(0.0, 0.86, f"Stress scenario: {stress_mode}  (multiplier = {shock:.2f})", fontsize=10, va="top")
         ax.text(0.0, 0.83, f"Effective threat frequency λ: {lam_effective:.2f} events/year", fontsize=10, va="top")
 
-        # Key metrics "cards"
+        # Metric cards
         y0 = 0.74
         card_h = 0.12
+
         ax.add_patch(Rectangle((0.0, y0 - card_h), 1.0, card_h, facecolor="#F7F7F7", edgecolor="#E0E0E0"))
         ax.text(0.02, y0 - 0.02, "Baseline", fontsize=12, fontweight="bold", va="top")
         ax.text(0.02, y0 - 0.07, f"EAL: {_fmt_money(baseline_metrics['Expected Annual Loss'])}", fontsize=11, va="top")
@@ -181,35 +214,29 @@ def export_pdf_report(
             ax.text(0.35, y1 - 0.07, f"Breach-Year: {controlled_metrics['Probability of Breach-Year']:.2%}", fontsize=11, va="top")
             ax.text(0.70, y1 - 0.07, f"VaR 95%: {_fmt_money(controlled_metrics['VaR 95%'])}", fontsize=11, va="top")
 
-            if rosi is not None and net_benefit is not None and controls.get("annual_control_cost", None) is not None:
+            if rosi is not None and net_benefit is not None:
                 ax.text(0.0, 0.41, "Investment Summary", fontsize=13, fontweight="bold", va="top")
                 ax.text(
-                    0.0, 0.36,
-                    "\n".join([
-                        f"Annual control cost: {_fmt_money(controls['annual_control_cost'])}",
-                        f"Estimated net benefit: {_fmt_money(net_benefit)} per year",
-                        f"ROSI: {rosi:.0%}",
-                    ]),
-                    fontsize=11, va="top"
+                    0.0,
+                    0.36,
+                    "\n".join(
+                        [
+                            f"Annual control cost: {_fmt_money(controls['annual_control_cost'])}",
+                            f"Estimated net benefit: {_fmt_money(net_benefit)} per year",
+                            f"ROSI: {rosi:.0%}",
+                        ]
+                    ),
+                    fontsize=11,
+                    va="top",
                 )
 
-                if net_benefit > 0:
-                    ax.text(
-                        0.0, 0.22,
-                        "Strategic Interpretation: Controls materially reduce expected losses and are financially justified under current assumptions.",
-                        fontsize=10, color="black", va="top"
-                    )
-                else:
-                    ax.text(
-                        0.0, 0.22,
-                        "Strategic Interpretation: Controls reduce risk but may not be cost-effective under current assumptions.",
-                        fontsize=10, color="black", va="top"
-                    )
-
         ax.text(
-            0.0, 0.10,
+            0.0,
+            0.12,
             "Note: Scenario-based Monte Carlo model. Results depend on selected assumptions.",
-            fontsize=9, color="gray", va="top"
+            fontsize=9,
+            color="gray",
+            va="top",
         )
 
         _footer(fig)
@@ -217,7 +244,7 @@ def export_pdf_report(
         plt.close(fig)
 
         # =========================
-        # PAGE 2 — Controls + Assumptions (clean layout)
+        # PAGE 2 — Controls Summary
         # =========================
         fig = plt.figure(figsize=(8.27, 11.69))
         fig.patch.set_facecolor("white")
@@ -253,14 +280,18 @@ def export_pdf_report(
 
         ax.text(0.0, 0.62, "How to interpret", fontsize=13, fontweight="bold", va="top")
         ax.text(
-            0.0, 0.58,
-            "\n".join([
-                "• EAL estimates the expected annual loss under selected inputs.",
-                "• Breach-Year is the probability of ≥1 successful breach within a year.",
-                "• VaR 95% indicates a severe (worst 5%) loss threshold.",
-                "• ROSI compares risk reduction vs. annual control cost (not a guarantee).",
-            ]),
-            fontsize=11, va="top"
+            0.0,
+            0.58,
+            "\n".join(
+                [
+                    "• EAL estimates the expected annual loss under selected inputs.",
+                    "• Breach-Year is the probability of ≥1 successful breach within a year.",
+                    "• VaR 95% indicates a severe (worst 5%) loss threshold.",
+                    "• ROSI compares risk reduction vs. annual control cost (not a guarantee).",
+                ]
+            ),
+            fontsize=11,
+            va="top",
         )
 
         _footer(fig)
@@ -282,20 +313,22 @@ def export_pdf_report(
 
 
 # =============================
-# Header (logo + title)
+# UI Header
 # =============================
 logo_path = os.path.join("assets", "aims_logo.png")
 
 h1, h2 = st.columns([1, 3], vertical_alignment="center")
 with h1:
-    safe_show_logo(logo_path, width=160)
+    safe_show_logo(logo_path, width=170)
 with h2:
     st.title("🛡️ Cyber Risk Quantification Dashboard")
     st.caption("Monte Carlo cyber risk model • Controls ROI/ROSI • Stress testing • Sensitivity • PDF export")
 
+st.caption(f"App version: {APP_VERSION}")
+
 
 # =============================
-# Sidebar: Inputs
+# Sidebar controls
 # =============================
 st.sidebar.header("Simulation Inputs")
 
@@ -309,51 +342,32 @@ exposure_factor = st.sidebar.slider("Exposure Factor (0–1)", 0.10, 1.00, 0.50)
 sev_mu = st.sidebar.slider("Severity Mean (lognormal μ)", 0.0, 2.0, 0.50)
 sev_sigma = st.sidebar.slider("Severity Std (lognormal σ)", 0.10, 2.0, 1.00)
 
-
-# =============================
-# Sidebar: Controls
-# =============================
 st.sidebar.markdown("---")
 st.sidebar.header("Security Controls")
-
 use_controls = st.sidebar.checkbox("Enable Security Controls", value=True)
 lambda_reduction = st.sidebar.slider("Threat Reduction (%)", 0, 90, 30)
 vuln_reduction = st.sidebar.slider("Vulnerability Reduction (%)", 0, 90, 40)
 severity_reduction = st.sidebar.slider("Impact Reduction (%)", 0, 90, 25)
 
-
-# =============================
-# Sidebar: ROI
-# =============================
 st.sidebar.markdown("---")
 st.sidebar.header("Investment (ROI)")
-
 annual_control_cost = st.sidebar.number_input(
     "Annual control cost ($/year)",
     value=250_000,
     step=10_000,
-    help="Estimated annual cost of the selected controls (licenses, staff time, training, etc.)"
+    help="Estimated annual cost of the selected controls (licenses, staff time, training, etc.)",
 )
 
-
-# =============================
-# Sidebar: Sensitivity
-# =============================
 st.sidebar.markdown("---")
 st.sidebar.header("Sensitivity Analysis")
 run_sensitivity = st.sidebar.checkbox("Run sensitivity analysis (slower)", value=False)
 sens_pct = st.sidebar.slider("Sensitivity change (%)", 5, 50, 20)
 
-
-# =============================
-# Sidebar: Stress Testing
-# =============================
 st.sidebar.markdown("---")
 st.sidebar.header("Stress Testing")
-
 stress_mode = st.sidebar.selectbox(
     "Stress Scenario",
-    ["Normal Year", "Elevated Threat Year", "Ransomware Wave", "Custom"]
+    ["Normal Year", "Elevated Threat Year", "Ransomware Wave", "Custom"],
 )
 
 custom_shock = 2.0
@@ -369,22 +383,26 @@ if "last" not in st.session_state:
 
 
 # =============================
-# Run simulation
+# MAIN: Run button on home page (what you asked)
 # =============================
-run = st.sidebar.button("Run Simulation")
-if run:
+st.markdown("### ▶️ Run")
+run_main = st.button("Run Simulation", use_container_width=False)
+
+if run_main:
     shock = stress_multiplier(stress_mode, custom_shock)
     lam_effective = lam * shock
+
     st.info(f"Stress scenario selected: **{stress_mode}** → λ becomes **{lam_effective:.2f} events/year**")
 
+    # Baseline
     baseline_losses = simulate_annual_losses(
         trials, lam_effective, p_vuln, asset_value, exposure_factor, sev_mu, sev_sigma
     )
     baseline_metrics = compute_risk_metrics(baseline_losses)
 
+    # Controlled
     controlled_losses = None
     controlled_metrics = None
-
     if use_controls:
         lam_control = lam_effective * (1 - lambda_reduction / 100.0)
         p_control = p_vuln * (1 - vuln_reduction / 100.0)
@@ -395,16 +413,17 @@ if run:
         )
         controlled_metrics = compute_risk_metrics(controlled_losses)
 
+    # ROI
     rosi = None
     net_benefit = None
     risk_reduction = None
-
     if controlled_metrics is not None:
-        risk_reduction = baseline_metrics["Expected Annual Loss"] - controlled_metrics["Expected Annual Loss"]
-        net_benefit = risk_reduction - annual_control_cost
+        risk_reduction = float(baseline_metrics["Expected Annual Loss"] - controlled_metrics["Expected Annual Loss"])
+        net_benefit = float(risk_reduction - annual_control_cost)
         rosi = (net_benefit / annual_control_cost) if annual_control_cost > 0 else np.nan
 
-    tornado_fig = None
+    # Sensitivity
+    tornado_results = None
     if run_sensitivity:
         base_eal = float(baseline_metrics["Expected Annual Loss"])
         delta = sens_pct / 100.0
@@ -434,8 +453,8 @@ if run:
                 p_low = max(0.0, p_vuln * (1 - delta))
                 p_high = min(1.0, p_vuln * (1 + delta))
             elif name == "asset_value":
-                av_low = av_low * (1 - delta)
-                av_high = av_high * (1 + delta)
+                av_low *= (1 - delta)
+                av_high *= (1 + delta)
             elif name == "exposure_factor":
                 ef_low = max(0.0, exposure_factor * (1 - delta))
                 ef_high = min(1.0, exposure_factor * (1 + delta))
@@ -443,7 +462,7 @@ if run:
                 mu_low = max(0.0, sev_mu * (1 - delta))
                 mu_high = sev_mu * (1 + delta)
             elif name == "sev_sigma":
-                sg_low = max(0.1, sev_sigma * (1 - delta))
+                sg_low = max(0.10, sev_sigma * (1 - delta))
                 sg_high = sev_sigma * (1 + delta)
 
             eal_low = compute_eal(trials, lam_low, p_low, av_low, ef_low, mu_low, sg_low)
@@ -455,34 +474,38 @@ if run:
             results.append((label, impact_low, impact_high, span))
 
         results.sort(key=lambda x: x[3], reverse=True)
-        tornado_fig = make_tornado_figure(results, sens_pct)
+        tornado_results = results
 
-    dist_fig = make_distribution_figure(baseline_losses, baseline_metrics, controlled_losses, controlled_metrics)
-
+    # Store raw data (safer than storing matplotlib figs)
     st.session_state.last = {
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "stress_mode": stress_mode,
         "shock": shock,
         "lam_effective": lam_effective,
         "inputs": {
-            "trials": trials, "lam": lam, "p_vuln": p_vuln,
-            "asset_value": float(asset_value), "exposure_factor": exposure_factor,
-            "sev_mu": sev_mu, "sev_sigma": sev_sigma,
+            "trials": trials,
+            "lam": float(lam),
+            "p_vuln": float(p_vuln),
+            "asset_value": float(asset_value),
+            "exposure_factor": float(exposure_factor),
+            "sev_mu": float(sev_mu),
+            "sev_sigma": float(sev_sigma),
         },
         "controls": {
-            "use_controls": use_controls,
+            "use_controls": bool(use_controls),
             "lambda_reduction": int(lambda_reduction),
             "vuln_reduction": int(vuln_reduction),
             "severity_reduction": int(severity_reduction),
             "annual_control_cost": float(annual_control_cost),
         },
+        "baseline_losses": baseline_losses,
         "baseline_metrics": baseline_metrics,
+        "controlled_losses": controlled_losses,
         "controlled_metrics": controlled_metrics,
         "rosi": rosi,
         "net_benefit": net_benefit,
         "risk_reduction": risk_reduction,
-        "fig_dist": dist_fig,
-        "fig_tornado": tornado_fig,
+        "tornado_results": tornado_results,
     }
 
 
@@ -501,32 +524,32 @@ else:
 
     if controlled_metrics is None:
         c1, c2, c3 = st.columns(3)
-        c1.metric("Expected Annual Loss (EAL)", f"{_fmt_money(baseline_metrics['Expected Annual Loss'])}")
+        c1.metric("Expected Annual Loss (EAL)", _fmt_money(baseline_metrics["Expected Annual Loss"]))
         c2.metric("Probability of Breach-Year", f"{baseline_metrics['Probability of Breach-Year']:.2%}")
-        c3.metric("VaR 95%", f"{_fmt_money(baseline_metrics['VaR 95%'])}")
+        c3.metric("VaR 95%", _fmt_money(baseline_metrics["VaR 95%"]))
     else:
         left, right = st.columns(2)
 
         with left:
             st.markdown("### Baseline")
             c1, c2, c3 = st.columns(3)
-            c1.metric("EAL", f"{_fmt_money(baseline_metrics['Expected Annual Loss'])}")
+            c1.metric("EAL", _fmt_money(baseline_metrics["Expected Annual Loss"]))
             c2.metric("Breach-Year", f"{baseline_metrics['Probability of Breach-Year']:.2%}")
-            c3.metric("VaR 95%", f"{_fmt_money(baseline_metrics['VaR 95%'])}")
+            c3.metric("VaR 95%", _fmt_money(baseline_metrics["VaR 95%"]))
 
         with right:
             st.markdown("### With Controls")
             c4, c5, c6 = st.columns(3)
             eal_delta = baseline_metrics["Expected Annual Loss"] - controlled_metrics["Expected Annual Loss"]
-            c4.metric("EAL", f"{_fmt_money(controlled_metrics['Expected Annual Loss'])}", delta=f"-{_fmt_money(eal_delta)}")
+            c4.metric("EAL", _fmt_money(controlled_metrics["Expected Annual Loss"]), delta=f"-{_fmt_money(eal_delta)}")
             c5.metric("Breach-Year", f"{controlled_metrics['Probability of Breach-Year']:.2%}")
-            c6.metric("VaR 95%", f"{_fmt_money(controlled_metrics['VaR 95%'])}")
+            c6.metric("VaR 95%", _fmt_money(controlled_metrics["VaR 95%"]))
 
         st.subheader("💰 ROI / ROSI (Investment Value)")
         cA, cB, cC, cD = st.columns(4)
-        cA.metric("Annual Risk Reduction", f"{_fmt_money(last['risk_reduction'])}")
-        cB.metric("Annual Control Cost", f"{_fmt_money(last['controls']['annual_control_cost'])}")
-        cC.metric("Net Benefit", f"{_fmt_money(last['net_benefit'])}")
+        cA.metric("Annual Risk Reduction", _fmt_money(last["risk_reduction"]))
+        cB.metric("Annual Control Cost", _fmt_money(last["controls"]["annual_control_cost"]))
+        cC.metric("Net Benefit", _fmt_money(last["net_benefit"]))
         rosi = last["rosi"]
         cD.metric("ROSI", f"{rosi:.2%}" if (rosi is not None and not np.isnan(rosi)) else "N/A")
 
@@ -536,7 +559,6 @@ else:
             st.warning("Controls may not be cost-effective under these assumptions (net benefit ≤ 0).")
 
     st.subheader("🧾 Executive Summary (Plain Language)")
-
     breach_base = baseline_metrics["Probability of Breach-Year"]
     eal_base = baseline_metrics["Expected Annual Loss"]
     var_base = baseline_metrics["VaR 95%"]
@@ -578,11 +600,21 @@ else:
     st.caption("Scenario-based Monte Carlo model. Results depend on the assumptions you select.")
 
     st.subheader("📈 Annual Loss Distribution")
-    st.pyplot(last["fig_dist"])
+    dist_fig = make_distribution_figure(
+        last["baseline_losses"],
+        last["baseline_metrics"],
+        last["controlled_losses"],
+        last["controlled_metrics"],
+    )
+    st.pyplot(dist_fig)
+    plt.close(dist_fig)
 
-    if last["fig_tornado"] is not None:
+    tornado_fig = None
+    if last.get("tornado_results") is not None:
         st.subheader("🧪 Sensitivity Analysis (Tornado Plot)")
-        st.pyplot(last["fig_tornado"])
+        tornado_fig = make_tornado_figure(last["tornado_results"], sens_pct)
+        st.pyplot(tornado_fig)
+        plt.close(tornado_fig)
 
     st.subheader("📄 Export Executive PDF (Professional)")
     st.caption("Logo path used: assets/aims_logo.png")
@@ -590,6 +622,18 @@ else:
     if st.button("Generate PDF Report"):
         tmp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         tmp_pdf.close()
+
+        # regenerate figures for PDF (fresh, not closed)
+        pdf_dist_fig = make_distribution_figure(
+            last["baseline_losses"],
+            last["baseline_metrics"],
+            last["controlled_losses"],
+            last["controlled_metrics"],
+        )
+
+        pdf_tornado_fig = None
+        if last.get("tornado_results") is not None:
+            pdf_tornado_fig = make_tornado_figure(last["tornado_results"], sens_pct)
 
         export_pdf_report(
             out_path=tmp_pdf.name,
@@ -604,9 +648,13 @@ else:
             controlled_metrics=last["controlled_metrics"],
             rosi=last["rosi"],
             net_benefit=last["net_benefit"],
-            dist_fig=last["fig_dist"],
-            tornado_fig=last["fig_tornado"],
+            dist_fig=pdf_dist_fig,
+            tornado_fig=pdf_tornado_fig,
         )
+
+        plt.close(pdf_dist_fig)
+        if pdf_tornado_fig is not None:
+            plt.close(pdf_tornado_fig)
 
         with open(tmp_pdf.name, "rb") as f:
             st.download_button(
